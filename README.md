@@ -8,7 +8,7 @@ Works on:
 - CUDA 10.1
 - Tensorflow 2.3.1
 
-[Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?both)
+[Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?view)
 
 # DDPG Algorithm
 ## InvertedPendulum-v2
