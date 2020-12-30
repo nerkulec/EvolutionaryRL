@@ -33,6 +33,9 @@ Works on:
 ### 0.001 -> 0.0001
 ![](imgs/train_reward_lognoise_2.jpg)
 
+### 0.1 -> 0.0001, 20000 epochs
+![](imgs/train_reward_lognoise_long_run.jpg)
+
 ## Test reward plots:
 
 ![](imgs/test_reward1.jpg)
@@ -44,5 +47,8 @@ Works on:
 
 ### 0.001 -> 0.0001
 ![](imgs/test_reward_lognoise_2.jpg)
+
+### 0.1 -> 0.0001, 20000 epochs
+![](imgs/test_reward_lognoise_long_run.jpg)
 
 One test run had 2000 steps
