@@ -8,6 +8,12 @@ Works on:
 - CUDA 10.1
 - Tensorflow 2.3.1
 
+# Steps to reproduce my experiments:
+- Install above dependencies
+- Pull this repository
+- Create empty folders named buffers/ and models/
+- Run all cells in the AlgEvo.ipynb notebook
+
 [Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?view)
 
 # DDPG Algorithm
