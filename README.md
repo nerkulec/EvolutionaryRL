@@ -16,6 +16,8 @@ Works on:
 [Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?view)
 
 # InvertedPendulum-v2
+![](imgs/InvertedPendulum-v2.png)
+
 ## DDPG Algorithm
 ![](imgs/DDPG/InvertedPendulum-v2/train_reward_test2-pt1.jpg)
 ![](imgs/DDPG/InvertedPendulum-v2/test_reward_test2-pt1.jpg)
