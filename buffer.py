@@ -1,15 +1,20 @@
 import numpy as np
 from tqdm.auto import tqdm, trange
 import pickle
+import pathlib
 
-def get_buffer(size, env, name='1'):
-    try:
-        file_name = f'buffers/{env.spec.id}-{name}.pkl'
-        with open(file_name, 'rb') as f:
-            print('Buffer loaded from disk')
-            return pickle.load(f)
+def get_buffer(size, env, fresh = False, name='1'):
+    if not fresh:
+        try:
+            file_name = f'buffers/{env.spec.id}.pkl'
+            with open(file_name, 'rb') as f:
+                print('Buffer loaded from disk')
+                return pickle.load(f)
 
-    except FileNotFoundError:
+        except FileNotFoundError:
+            fresh = True
+    
+    if fresh:
         print('Fresh buffer created')
         return Buffer(size, env, name)
 
@@ -19,8 +24,8 @@ class Buffer:
         self.env = env
         self.env_id = env.spec.id
         self.name = name
-        self.state_size = np.prod(env.observation_space.shape)
-        self.action_size = np.prod(env.action_space.shape)
+        self.state_size = int(np.prod(env.observation_space.shape))
+        self.action_size = int(np.prod(env.action_space.shape))
         self.i = 0
         self.buffer = np.zeros(
             (self.size, self.state_size*2+self.action_size+2), # (s, a, r, s', d)
@@ -29,8 +34,16 @@ class Buffer:
 
     def store(self, state, action, reward, next_state, terminal):
         i = self.i % self.size
+        
+        if type(state) is not int:
+            state = state.flatten()
+        if type(action) is not int:
+            action = action.flatten()
+        if type(next_state) is not int:
+            next_state = next_state.flatten()
+
         self.buffer[i,:] = np.hstack(
-            [state.flatten(), action.flatten(), reward, next_state.flatten(), terminal]
+            [state, action, reward, next_state, terminal]
         )
         self.i += 1
 
@@ -61,5 +74,7 @@ class Buffer:
                 sample[:, -1])                                                                       # done
 
     def save_to_file(self):
-        with open(f'buffers/{self.env_id}-{self.name}.pkl', 'wb') as f:
+        directory = 'buffers'
+        pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
+        with open(f'{directory}/{self.env_id}.pkl', 'wb') as f:
             pickle.dump(self, f)
