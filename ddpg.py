@@ -19,13 +19,13 @@ class DDPG(Alg):
         state = self.env.reset()
         
         if not self.buffer.full():
-            self.buffer.fill()
+            self.buffer.fill(self.env)
         
         print("Now training")
         with trange(epochs) as t:
             for epoch in t:
                 for _ in range(self.actions_per_epoch):
-                    action = self.get_action(state, self.actor, self.action_noise(epoch/epochs))
+                    action = self.get_action(self.actor, state, self.action_noise(epoch/epochs))
                     state = self.step(state, action)
                     if render:
                         self.env.render()
@@ -34,7 +34,7 @@ class DDPG(Alg):
                 for _ in range(self.training_steps_per_epoch):
                     self.train_step(batch_size)
                 if (epoch+1) % test_every == 0:
-                    avg_fitness = self.test(5, render = render_test)
+                    avg_fitness = self.test(1, render = render_test)
                     t.set_postfix(test_fitness = avg_fitness)
 
         return self.stats

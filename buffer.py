@@ -21,7 +21,6 @@ def get_buffer(size, env, fresh = False, name='1'):
 class Buffer:
     def __init__(self, size, env, name='1'):
         self.size = size
-        self.env = env
         self.env_id = env.spec.id
         self.name = name
         self.state_size = int(np.prod(env.observation_space.shape))
@@ -47,15 +46,15 @@ class Buffer:
         )
         self.i += 1
 
-    def fill(self):
+    def fill(self, env):
         print("Filling up buffer")
-        state = self.env.reset()
+        state = env.reset()
         for _ in trange(self.size-self.i):
-            action = self.env.action_space.sample()
-            next_state, reward, done, _ = self.env.step(action)
+            action = env.action_space.sample()
+            next_state, reward, done, _ = env.step(action)
             self.store(state, action, reward, next_state, done)
             if done:
-                state = self.env.reset()
+                state = env.reset()
             else:
                 state = next_state
         print("Buffer filled")

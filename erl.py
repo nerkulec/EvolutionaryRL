@@ -27,7 +27,7 @@ class ERL(Alg):
         self.stats = defaultdict(list)
 
         if not self.buffer.full():
-            self.buffer.fill()
+            self.buffer.fill(self.env)
         
         print("Now training")
         with trange(epochs) as t:
@@ -85,8 +85,9 @@ class ERL(Alg):
                     self.actors[-1] = clone(self.actor)
 
                 if (epoch+1) % test_every == 0:
-                    avg_fitness = self.test(5, render = render_test)
+                    avg_fitness = self.test(1, render = render_test)
                     t.set_postfix(test_fitness = avg_fitness)
+                    self.test(1, render = render_test, rl_actors = True)
 
         return self.stats
 
@@ -97,3 +98,32 @@ class ERL(Alg):
                 actor_layer.get_weights())))
         return actor
 
+
+    def test(self, num_episodes = 1, render = True, rl_actors = False):
+        fitness = 0
+        if not rl_actors:
+            for _ in range(num_episodes):
+                state = self.env.reset()
+                done = False
+                while not done:
+                    if render:
+                        self.env.render()
+                    action = self.actor(np.array([state])).numpy()[0]
+                    state, reward, done, _ = self.env.step(action)
+                    fitness += reward
+            if self.test_summary_writer:
+                with self.test_summary_writer.as_default():
+                    tf.summary.scalar('reward', fitness/num_episodes)
+            self.stats['test_reward'].append(fitness/num_episodes)
+            return fitness/num_episodes
+        else:
+            for actor in self.actors:
+                state = self.env.reset()
+                done = False
+                while not done:
+                    if render:
+                        self.env.render()
+                    action = actor(np.array([state])).numpy()[0]
+                    state, reward, done, _ = self.env.step(action)
+                    fitness += reward
+            return fitness/len(self.actors)

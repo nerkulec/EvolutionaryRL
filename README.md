@@ -15,6 +15,21 @@ Works on:
 
 [Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?view)
 
+# RLCar-v0
+![](imgs/RLCar.png)
+
+## ERL
+![](imgs/ERL/RLCar-v0/train_reward_test3.jpg)
+![](imgs/ERL/RLCar-v0/test_reward_test3.jpg)
+![](imgs/ERL/RLCar-v0/actors_reward_test3.jpg)
+![](imgs/ERL/RLCar-v0/train_reward_test4.jpg)
+
+(tutaj jedne wartości są parzyste wartości są agenta głównego, a nieparzyste - ewolucyjnego)
+
+![](imgs/ERL/RLCar-v0/test_reward_test4.jpg)
+![](imgs/ERL/RLCar-v0/actors_reward_test4.jpg)
+
+
 # InvertedPendulum-v2
 ![](imgs/InvertedPendulum-v2.png)
 
