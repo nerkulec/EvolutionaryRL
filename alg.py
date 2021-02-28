@@ -67,7 +67,7 @@ class Alg:
         with tf.GradientTape() as tape:
             predictions = tf.reshape(self.critic(critic_input), -1)
             L = tf.reduce_mean(tf.square(targets - predictions), axis=0)
-
+        self.stats['critic_loss'].append(L.numpy())
         gradients = tape.gradient(L, self.critic.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.critic.trainable_variables))
 
@@ -76,6 +76,7 @@ class Alg:
             actor_actions = self.actor(states)
             # negative loss so that optimizer maximizes instead of minimize
             Q = -tf.reduce_mean(self.critic(tf.concat([states, actor_actions], 1)), axis=0)
+        self.stats['actor_loss'].append(Q.numpy())
         gradients = tape.gradient(Q, self.actor.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.actor.trainable_variables))
 

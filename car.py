@@ -3,7 +3,7 @@ import numpy as np
 
 oil_sigma = 0.2
 
-max_vel = 0.2
+max_vel = 0.15
 max_acc = 0.02
 
 class Car:
