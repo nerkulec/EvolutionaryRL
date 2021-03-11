@@ -12,8 +12,8 @@ Works with:
 # Steps to reproduce my experiments:
 - Install above dependencies (exact versions - especially for mujoco, CUDA and pyglet)
 - Pull this repository
-- Run AlgEvo.py
-- VSCode is recommended - AlgEvo.py can be opened as a notebook and plots will be shown in interactive window
+- Run experiment.py
+- VSCode is recommended - experiment.py can be opened as a notebook and plots will be shown in interactive window
 - Training can be safely interrupted with Ctrl+C in console or with the red square in VSCode and plots will still be produced
 
 [Hackmd for tracking progress](https://hackmd.io/NUtcNODST3SHuBCEYfpFUg?view)
