@@ -53,12 +53,10 @@ class Buffer:
             action = env.action_space.sample()
             next_state, reward, done, _ = env.step(action)
             self.store(state, action, reward, next_state, done)
+            state = next_state
             if done:
                 state = env.reset()
-            else:
-                state = next_state
         print("Buffer filled")
-        self.save_to_file()
         
     def full(self):
         return self.i >= self.size
