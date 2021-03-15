@@ -1,12 +1,52 @@
 # %%
 env_name = 'RLCar-v0'
 alg_name = 'ERL2'
-name = 'base'
+exp_name = 'base-test-2'
+
+from documenter import Documenter
+doc = Documenter(env_name, alg_name, exp_name,
+    # environment
+    map='maps/map4.txt',
+    num_rays=12,
+    step_cost=0.1,
+
+    # algorithm
+    episodes_per_actor=1,
+    episodes_rl_actor=5,
+    training_steps_per_epoch=10,
+    num_actors=40, elite_frac=0.05,
+    mutation_prob = 0.8,
+    mutation_rate = 0.2,
+    action_noise = 0,
+    buffer_size = 10**5,
+    fresh_buffer = False,
+    polyak = 0.99,
+
+    # optimizer
+    lr = 0.01,
+
+    # training
+    epochs=4000,
+    batch_size=256,
+    test_every=5,
+    render_test=False
+)
+doc.add_folder('maps')
+doc.add_file('erl.py')
+doc.add_file('es.py')
+doc.add_file('experiment.py')
+doc.add_file('buffer.py')
+doc.add_file('car_env.py')
+doc.add_file('car.py')
+doc.add_file('documenter.py')
+doc.add_file('racing_track.py')
+doc.add_file('util.py')
+
+doc.save_files()
+doc.save_settings()
 
 import numpy as np
-np.random.seed(hash(f'{env_name}-{alg_name}-{name}')%(2**32))
-
-
+np.random.seed(hash(doc)%(2**32))
 # %%
 import math
 import gym
@@ -30,24 +70,21 @@ import pathlib
 
 from erl import ERL
 from car_env import CarEnv
-# %%
-pathlib.Path('buffers').mkdir(parents=True, exist_ok=True)
-pathlib.Path('models' ).mkdir(parents=True, exist_ok=True)
 
 env = None
 if env_name == 'RLCar-v0':
-    env = CarEnv(file_name = 'maps/map4.txt', num_rays = 12, draw_rays=False)
+    env = CarEnv(file_name = doc.settings['map'], step_cost = doc.settings['step_cost'],
+        num_rays = doc.settings['num_rays'], draw_rays=False)
 else:
     env = gym.make(env_name)
-
 
 # %%
 state_size = int(np.prod(env.observation_space.shape))
 action_size = int(np.prod(env.action_space.shape))
 if alg_name != 'SimpleES':
     try:
-        actor  = tf.keras.models.load_model(f'models/{env_name}/{alg_name}-{name}-actor')
-        critic = tf.keras.models.load_model(f'models/{env_name}/{alg_name}-{name}-critic')
+        actor  = tf.keras.models.load_model(doc.get_model_path('actor'))
+        critic = tf.keras.models.load_model(doc.get_model_path('critic'))
         print('Models loaded from disk')
 
     except OSError:
@@ -56,52 +93,49 @@ if alg_name != 'SimpleES':
         except:
             action_high = float(env.action_space.high[0])
 
-        # one-layer perceptrons:
         actor = Sequential([
             Input(state_size),
-            # Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
+            Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
             Dense(action_size, activation='tanh', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
             Lambda(lambda x: x*action_high)
         ])
         critic = Sequential([
             Input(state_size+action_size),
-            # Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
+            Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
             Dense(1)
         ])
         print('Fresh models created')
 
 # %%
 # adam = Adam()
-sgd = SGD(learning_rate=0.01)
-alg = ERL(env, actor, critic, sgd, name = name, episodes_per_actor=1, episodes_rl_actor=5,
-    training_steps_per_epoch=10, num_actors=40, elite_frac=0.05, mutation_prob = 0.8,
-    action_noise = 0, mutation_rate = 0.2, buffer_size = 10**5, polyak = 0.9)
+sgd = SGD(learning_rate=doc.settings['lr'])
+alg = ERL(env, actor, critic, sgd, doc = doc, **doc.settings)
 # %%
-env.render(mode='trajectories')
+render_mode = 'trajectories'
+env.render(mode=render_mode)
 try:
-    stats = alg.train(epochs=4000, batch_size=256, test_every=5, render_test=False, render_mode='trajectories')
+    stats = alg.train(render_mode=render_mode, **doc.settings)
 
 except (KeyboardInterrupt, SystemExit) as e:
     print('Interrupted')
     stats = alg.stats
 
-# alg.buffer.save_to_file()
-# alg.save_models()
+env.close()
+
+doc.save_buffer(alg.buffer)
+doc.save_models(alg)
+
+print(f'Buffer overwritten {alg.buffer.i/alg.buffer.size:.1f} times')
 # %%
 plt.plot(stats['critic_loss'])
 plt.suptitle('Critic loss')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/critic_loss_{name}.jpg')
-
+doc.save_fig(plt, 'critic_loss')
 # %%
 plt.plot(stats['actor_loss'])
 plt.suptitle('Actor loss')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/actor_loss_{name}.jpg')
+doc.save_fig(plt, 'actor_loss')
 # %%
 critic_pred = np.array(stats['critic_pred'])
 mean = np.mean(critic_pred, axis=1)
@@ -110,9 +144,7 @@ plt.plot(mean)
 plt.fill_between(np.arange(critic_pred.shape[0]), mean-std_dev*1.5, mean+std_dev*1.5, alpha = 0.5)
 plt.suptitle('Critic prediction')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/critic_pred_{name}.jpg')
+doc.save_fig(plt, 'critic_pred')
 # %%
 actor_pred = np.array(stats['actor_pred'])
 actor_pred_x = actor_pred[:,:,0]
@@ -128,30 +160,26 @@ plt.fill_between(np.arange(actor_pred_x.shape[0]), mean_x-std_dev_x*1.5, mean_x+
 plt.fill_between(np.arange(actor_pred_y.shape[0]), mean_y-std_dev_y*1.5, mean_y+std_dev_y*1.5, alpha = 0.5)
 plt.suptitle('Actor prediction')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/actor_pred_{name}.jpg')
+doc.save_fig(plt, 'actor_pred')
 # %%
-critic_weights = np.array(stats['critic_weights'])
-s = critic_weights.shape
-critic_weights = critic_weights.reshape((s[0], s[1]))
-plt.plot(critic_weights)
+critic_weights = stats['critic_weights']
+fig, ax = plt.subplots()
+for i in range(len(critic_weights[0])):
+    color = next(ax._get_lines.prop_cycler)['color']
+    plt.plot([w[i].flatten() for w in critic_weights], color = color)
 plt.suptitle('Critic weights')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/critic_weights_{name}.jpg')
+doc.save_fig(plt, 'critic_weights')
 
 # %%
-actor_weights = np.array(stats['actor_weights'])
-s = actor_weights.shape
-actor_weights = actor_weights.reshape((s[0], s[1]*2))
-plt.plot(actor_weights)
+actor_weights = stats['actor_weights']
+fig, ax = plt.subplots()
+for i in range(len(actor_weights[0])):
+    color = next(ax._get_lines.prop_cycler)['color']
+    plt.plot([w[i].flatten() for w in actor_weights], color = color)
 plt.suptitle('Actor weights')
 plt.xlabel('Train steps')
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-plt.savefig(f'{directory}/actor_weights_{name}.jpg')
+doc.save_fig(plt, 'actor_weights')
 
 # %%
 actors_rewards = np.array(stats['actors_rewards'])
@@ -160,11 +188,9 @@ low  = np.min(actors_rewards, axis=1)
 high = np.max(actors_rewards, axis=1)
 
 plt.plot(actors_rewards)
-directory = f'imgs/{alg_name}/{env_name}'
-pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
 
 plt.suptitle('Evolutionary actors rewards')
 plt.xlabel('Epochs')
 
-plt.savefig(f'{directory}/actors_reward_{name}.jpg')
+doc.save_fig(plt, 'actors_reward')
 # %%

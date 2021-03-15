@@ -18,7 +18,7 @@ class Spec: # remove when env properly registered
 class CarEnv(gym.Env):
   metadata = {'render.modes': ['human', 'trajectories']}
 
-  def __init__(self, file_name = 'maps/map1.txt', num_rays = 12, draw_rays = True, n_trajectories = 10**5):
+  def __init__(self, file_name = 'maps/map1.txt', num_rays = 12, draw_rays = True, n_trajectories = 10**5, step_cost = 0.1):
     super().__init__()
     self.action_space = spaces.Box(-1, 1, shape=(2,), dtype=np.float32)
     self.map = Map(file_name)
@@ -30,6 +30,7 @@ class CarEnv(gym.Env):
       high=np.concatenate([np.array([1, 1], dtype=np.float32), np.ones(num_features*self.num_rays, dtype=np.float32)]),
       dtype=np.float32, shape=(2+num_features*self.num_rays,)
     )
+    self.step_cost = 0.1
     self.window = None
     self.spec = Spec('RLCar-v0')
     self.color = None
@@ -70,7 +71,7 @@ class CarEnv(gym.Env):
       done = True
     elif self.ground == ' ' or self.ground == 'O':
       # nothing happens
-      reward = -0.01
+      reward = -self.step_cost
       done = False
     elif self.ground == '#':
       # we hit a wall
@@ -95,7 +96,7 @@ class CarEnv(gym.Env):
     if done and self.ground != 'M':
       # subtract distance from the finish line
       dist = math.sqrt((car.pos.x-self.map.M.x)**2+(car.pos.y-self.map.M.y)**2)
-      reward -= dist
+      reward -= dist*10
 
     obs = self.get_obs()
     return obs, reward/1000, done, {}

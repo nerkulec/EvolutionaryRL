@@ -15,10 +15,11 @@ def clone_with_weights(model):
     return new_model
 
 class ERL:
-    def __init__(self, env, actor, critic, optimizer, name = '1', buffer_size = 10**6, actions_per_epoch = 1,
-            training_steps_per_epoch = 1, gamma = 0.99, polyak = 0.995, action_noise = (1, 0.1),
-            train_summary_writer = None, test_summary_writer = None, num_actors = 10, elite_frac = 0.2,
-            episodes_per_actor = 1, episodes_rl_actor = 10, rl_actor_copy_every = 10, mutation_rate = 0.001, mutation_prob = 0.2):
+    def __init__(self, env, actor, critic, optimizer, doc = None, buffer_size = 10**6, fresh_buffer = False,
+            actions_per_epoch = 1, training_steps_per_epoch = 1, gamma = 0.99, polyak = 0.995,
+            action_noise = (1, 0.1), num_actors = 10, elite_frac = 0.2, episodes_per_actor = 1,
+            episodes_rl_actor = 10, rl_actor_copy_every = 10, mutation_rate = 0.001, mutation_prob = 0.2,
+            **kwargs):
         if type(env) is str:
             self.env = gym.make(env)
         else:
@@ -30,15 +31,14 @@ class ERL:
         self.target_critic = clone_with_weights(critic)
         self.optimizer = optimizer
         self.alg = 'erl'
-        self.name = name
-        self.buffer = get_buffer(buffer_size, self.env, name = name)
+        self.buffer = get_buffer(buffer_size, self.env, doc = doc, fresh = fresh_buffer)
 
         self.actions_per_epoch = actions_per_epoch
         self.training_steps_per_epoch = training_steps_per_epoch
         self.gamma = gamma
         self.polyak = polyak
-        self.train_summary_writer = train_summary_writer
-        self.test_summary_writer = test_summary_writer
+        # self.train_summary_writer = train_summary_writer
+        # self.test_summary_writer = test_summary_writer
         self.stats = defaultdict(list) # switch to tensorboard
         self.current_episode_len = 0
         self.cumulative_reward = 0
@@ -61,8 +61,11 @@ class ERL:
         
 
     def train(self, epochs, batch_size = 64, render = False, rl_actor_render = False,
-              test_every = 100, render_test = True, render_mode = 'human'):
+              test_every = 100, render_test = True, render_mode = 'human', **kwargs):
         self.stats = defaultdict(list)
+
+        self.env.color = (255, 255, 255)
+        self.env.opacity = 20
 
         if not self.buffer.full():
             self.buffer.fill(self.env)
@@ -166,7 +169,7 @@ class ERL:
 
         self.stats['critic_loss'].append(L.numpy())
         self.stats['critic_pred'].append(critic_ratings.numpy())
-        self.stats['critic_weights'].append(self.critic.get_weights()[0])
+        self.stats['critic_weights'].append(self.critic.get_weights())
 
         gradients = tape.gradient(L, self.critic.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.critic.trainable_variables))
@@ -179,7 +182,7 @@ class ERL:
 
         self.stats['actor_loss'].append(Q.numpy())
         self.stats['actor_pred'].append(actor_actions.numpy())
-        self.stats['actor_weights'].append(self.actor.get_weights()[0])
+        self.stats['actor_weights'].append(self.actor.get_weights())
 
         gradients = tape.gradient(Q, self.actor.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.actor.trainable_variables))
@@ -212,12 +215,9 @@ class ERL:
                     action = self.actor(np.array([state])).numpy()[0]
                     state, reward, done, _ = self.env.step(action)
                     if render or (render_mode == 'trajectories' and done):
-                        self.env.color = (0, 255, 0)
+                        self.env.color = None
                         self.env.render(mode = render_mode)
                     fitness += reward
-            if self.test_summary_writer:
-                with self.test_summary_writer.as_default():
-                    tf.summary.scalar('reward', fitness/num_episodes)
             self.stats['test_reward'].append(fitness/num_episodes)
             return fitness/num_episodes
         else:
@@ -232,13 +232,7 @@ class ERL:
                     action = actor(np.array([state])).numpy()[0]
                     state, reward, done, _ = self.env.step(action)
                     if render or (render_mode == 'trajectories' and done):
-                        self.env.color = (255, 255, 0)
+                        self.env.color = None
                         self.env.render(mode = render_mode)
                     fitness += reward
             return fitness/len(actors)
-
-    def save_models(self):
-        directory = f'models/{self.alg}/{self.env_id}'
-        pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
-        self.actor.save( f'{directory}/{self.name}-actor')
-        self.critic.save(f'{directory}/{self.name}-critic')
