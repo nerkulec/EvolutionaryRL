@@ -1,35 +1,30 @@
 # %%
-env_name = 'RLCar-v0'
-alg_name = 'ERL2'
-exp_name = 'base-test-2'
+env_name = 'CarEnv-v0'
+alg_name = 'ERL3'
+exp_name = 'torch_test-more-explore'
 
 from documenter import Documenter
 doc = Documenter(env_name, alg_name, exp_name,
-    # environment
-    map='maps/map4.txt',
-    num_rays=12,
-    step_cost=0.1,
-
     # algorithm
-    episodes_per_actor=1,
-    episodes_rl_actor=5,
-    training_steps_per_epoch=10,
-    num_actors=40, elite_frac=0.05,
-    mutation_prob = 0.8,
-    mutation_rate = 0.2,
-    action_noise = 0,
-    buffer_size = 10**5,
-    fresh_buffer = False,
-    polyak = 0.99,
+    episodes_per_actor = 1,
+    episodes_rl_actor = 5,
+    training_steps_per_epoch = 10,
+    num_actors = 40, elite_frac = 0.05,
+    mutation_prob  =  0.8,
+    mutation_rate  =  0.5,
+    action_noise  =  0,
+    buffer_size  =  10**5,
+    fresh_buffer  =  False,
+    polyak  =  0.99,
 
     # optimizer
-    lr = 0.01,
+    lr = 0.02,
 
     # training
-    epochs=4000,
-    batch_size=256,
-    test_every=5,
-    render_test=False
+    epochs = 4000,
+    batch_size = 2048,
+    test_every = 5,
+    render_test = False
 )
 doc.add_folder('maps')
 doc.add_file('erl.py')
@@ -49,7 +44,6 @@ import numpy as np
 np.random.seed(hash(doc)%(2**32))
 # %%
 import math
-import gym
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
 import tensorflow as tf
@@ -68,43 +62,44 @@ from tqdm.auto import tqdm, trange
 from datetime import datetime
 import pathlib
 
-from erl import ERL
-from car_env import CarEnv
+# from erl import ERL
+from erl_torch import ERL, Actor, Critic
 
-env = None
-if env_name == 'RLCar-v0':
-    env = CarEnv(file_name = doc.settings['map'], step_cost = doc.settings['step_cost'],
-        num_rays = doc.settings['num_rays'], draw_rays=False)
-else:
-    env = gym.make(env_name)
+import sys
+sys.path.append('~/RLCar/car_env')
+import gym
+import car_env
+env = gym.make(env_name)
 
 # %%
 state_size = int(np.prod(env.observation_space.shape))
 action_size = int(np.prod(env.action_space.shape))
-if alg_name != 'SimpleES':
-    try:
-        actor  = tf.keras.models.load_model(doc.get_model_path('actor'))
-        critic = tf.keras.models.load_model(doc.get_model_path('critic'))
-        print('Models loaded from disk')
+# if alg_name != 'SimpleES':
+#     try:
+#         actor  = tf.keras.models.load_model(doc.get_model_path('actor'))
+#         critic = tf.keras.models.load_model(doc.get_model_path('critic'))
+#         print('Models loaded from disk')
 
-    except OSError:
-        try:
-            action_high = float(env.action_space.high)
-        except:
-            action_high = float(env.action_space.high[0])
+#     except OSError:
+#         try:
+#             action_high = float(env.action_space.high)
+#         except:
+#             action_high = float(env.action_space.high[0])
 
-        actor = Sequential([
-            Input(state_size),
-            Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
-            Dense(action_size, activation='tanh', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
-            Lambda(lambda x: x*action_high)
-        ])
-        critic = Sequential([
-            Input(state_size+action_size),
-            Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
-            Dense(1)
-        ])
-        print('Fresh models created')
+#         actor = Sequential([
+#             Input(state_size),
+#             Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
+#             Dense(action_size, activation='tanh', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
+#             Lambda(lambda x: x*action_high)
+#         ])
+#         critic = Sequential([
+#             Input(state_size+action_size),
+#             Dense(12, activation='relu', kernel_regularizer=tf.keras.regularizers.L2(0.01)),
+#             Dense(1)
+#         ])
+#         print('Fresh models created')
+actor = Actor(state_size, action_size, env.action_space.high)
+critic = Critic(state_size, action_size)
 
 # %%
 # adam = Adam()
@@ -122,8 +117,8 @@ except (KeyboardInterrupt, SystemExit) as e:
 
 env.close()
 
-doc.save_buffer(alg.buffer)
-doc.save_models(alg)
+# doc.save_buffer(alg.buffer)
+# doc.save_models(alg)
 
 print(f'Buffer overwritten {alg.buffer.i/alg.buffer.size:.1f} times')
 # %%
