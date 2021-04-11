@@ -33,12 +33,9 @@ class Buffer:
     def store(self, state, action, reward, next_state, done):
         i = self.i % self.size
         
-        if type(state) is not int:
-            state = state.flatten()
-        if type(action) is not int:
-            action = action.flatten()
-        if type(next_state) is not int:
-            next_state = next_state.flatten()
+        state = state.flatten()
+        action = action.flatten()
+        next_state = next_state.flatten()
 
         self.buffer[i,:] = np.hstack(
             [state, action, reward, next_state, done]

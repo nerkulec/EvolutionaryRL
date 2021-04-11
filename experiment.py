@@ -1,7 +1,8 @@
 # %%
-env_name = 'CarEnv-v0'
-alg_name = 'ERL3'
-exp_name = 'torch_test-more-explore'
+env_name = 'rl_car:RLCar-v0'
+# env_name = 'MountainCarContinuous-v0'
+alg_name = 'ERL2'
+exp_name = 'erl_torch'
 
 from documenter import Documenter
 doc = Documenter(env_name, alg_name, exp_name,
@@ -13,7 +14,7 @@ doc = Documenter(env_name, alg_name, exp_name,
     mutation_prob  =  0.8,
     mutation_rate  =  0.5,
     action_noise  =  0,
-    buffer_size  =  10**5,
+    buffer_size  =  10**4,
     fresh_buffer  =  False,
     polyak  =  0.99,
 
@@ -21,21 +22,21 @@ doc = Documenter(env_name, alg_name, exp_name,
     lr = 0.02,
 
     # training
-    epochs = 4000,
+    epochs = 400000,
     batch_size = 2048,
     test_every = 5,
     render_test = False
 )
 doc.add_folder('maps')
-doc.add_file('erl.py')
-doc.add_file('es.py')
 doc.add_file('experiment.py')
 doc.add_file('buffer.py')
-doc.add_file('car_env.py')
-doc.add_file('car.py')
 doc.add_file('documenter.py')
-doc.add_file('racing_track.py')
-doc.add_file('util.py')
+# doc.add_file('erl.py')
+# doc.add_file('es.py')
+# doc.add_file('car_env.py')
+# doc.add_file('car.py')
+# doc.add_file('racing_track.py')
+# doc.add_file('util.py')
 
 doc.save_files()
 doc.save_settings()
@@ -64,6 +65,7 @@ import pathlib
 
 # from erl import ERL
 from erl_torch import ERL, Actor, Critic
+# from erl_spinup import ERL, Actor, Critic
 
 import sys
 sys.path.append('~/RLCar/car_env')
@@ -120,7 +122,12 @@ env.close()
 # doc.save_buffer(alg.buffer)
 # doc.save_models(alg)
 
-print(f'Buffer overwritten {alg.buffer.i/alg.buffer.size:.1f} times')
+# print(f'Buffer overwritten {alg.buffer.i/alg.buffer.size:.1f} times')
+# %%
+plt.plot(stats['reward'])
+plt.suptitle('Reward')
+plt.xlabel('Train steps')
+doc.save_fig(plt, 'reward')
 # %%
 plt.plot(stats['critic_loss'])
 plt.suptitle('Critic loss')
@@ -188,4 +195,13 @@ plt.suptitle('Evolutionary actors rewards')
 plt.xlabel('Epochs')
 
 doc.save_fig(plt, 'actors_reward')
+# %%
+env = alg.env
+state = env.reset()
+done = False
+i = 0
+while not done:
+    i += 1
+    action = alg.get_action(alg.actor, state)
+    state, reward, done, _ = env.step(action)
 # %%

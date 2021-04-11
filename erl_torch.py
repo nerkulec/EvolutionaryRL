@@ -11,6 +11,7 @@ from collections import defaultdict
 from copy import deepcopy
 import pathlib
 from buffer import get_buffer
+from memory import Memory
 
 
 if torch.cuda.is_available():
@@ -114,7 +115,8 @@ class ERL:
         self.target_critic = deepcopy(critic)
         # self.optimizer = optimizer
         self.alg = 'erl'
-        self.buffer = get_buffer(buffer_size, self.env, doc = doc, fresh = fresh_buffer)
+        # self.buffer = get_buffer(buffer_size, self.env, doc = doc, fresh = fresh_buffer)
+        self.memory = Memory(buffer_size, int(np.prod(self.env.observation_space.shape)), int(np.prod(self.env.action_space.shape)))
 
         self.actions_per_epoch = actions_per_epoch
         self.training_steps_per_epoch = training_steps_per_epoch
@@ -127,8 +129,8 @@ class ERL:
         self.cumulative_reward = 0
 
         self.mse = nn.MSELoss()
-        self.critic_optimizer = torch.optim.SGD(self.critic.parameters(), lr=0.01)
-        self.actor_optimizer = torch.optim.SGD(self.actor.parameters(), lr=0.01)
+        self.critic_optimizer = torch.optim.SGD(self.critic.parameters(), lr=0.05)
+        self.actor_optimizer = torch.optim.SGD(self.actor.parameters(), lr=0.05)
 
         # ERL things
         self.actors = [deepcopy(self.actor).cuda() for _ in range(num_actors)]
@@ -159,8 +161,17 @@ class ERL:
         self.env.color = (255, 255, 255)
         self.env.opacity = 20
 
-        if not self.buffer.full():
-            self.buffer.fill(self.env)
+        # if not self.buffer.full():
+        #     self.buffer.fill(self.env)
+
+        state = self.env.reset()
+        for _ in trange(self.memory.memory_size, miniters = 1000):
+            action = self.env.action_space.sample()
+            next_state, reward, done, _ = self.env.step(action)
+            self.memory.add([state, next_state, action, reward, done], None)
+            state = next_state
+            if done:
+                state = self.env.reset()
         
         print("Now training")
         with trange(epochs) as t:
@@ -177,7 +188,9 @@ class ERL:
                         while not done:
                             action = self.get_action(actor, state) # 0 noise
                             next_state, reward, done, _ = self.env.step(action)
-                            self.buffer.store(state, action, reward, next_state, done)
+                            # self.buffer.store(state, action, reward, next_state, done)
+                            # state, n_state, action, reward, done = datum
+                            self.memory.add([state, next_state, action, reward, done], None)
                             state = next_state
                             actor_reward += reward
                             if render:
@@ -210,7 +223,8 @@ class ERL:
                     while not done:
                         action = self.get_action(self.actor, state, self.action_noise(epoch/epochs))
                         next_state, reward, done, _ = self.env.step(action)
-                        self.buffer.store(state, action, reward, next_state, done)
+                        # self.buffer.store(state, action, reward, next_state, done)
+                        self.memory.add([state, next_state, action, reward, done], None)
                         total_reward += reward
                         state = next_state
                         if render or rl_actor_render:
@@ -234,51 +248,53 @@ class ERL:
         return self.stats
 
     def get_action(self, actor, state, noise=0):
-        action = to_numpy(actor(FloatTensor(state)))
+        with torch.no_grad():
+            action = to_numpy(actor(FloatTensor(state)))
         if noise != 0:
             action = np.random.normal(loc=action, scale=noise) # action noise (change to parameter noise)
         action = np.clip(action, self.env.action_space.low, self.env.action_space.high)
         return action
 
     def train_step(self, batch_size):
-        states, actions, rewards, next_states, done = self.buffer.sample(batch_size)
-        states = FloatTensor(states)
-        actions = FloatTensor(actions)
-        next_states = FloatTensor(next_states)
-        rewards = FloatTensor(rewards)
-        done = FloatTensor(done)
+        # states, actions, rewards, next_states, done = self.buffer.sample(batch_size)
+        # states = FloatTensor(states)
+        # actions = FloatTensor(actions)
+        # next_states = FloatTensor(next_states)
+        # rewards = FloatTensor(rewards)
+        # done = FloatTensor(done)
+        states, next_states, actions, rewards, done = self.memory.sample(batch_size)
         self.train_step_critic(states, actions, rewards, next_states, done)
         self.train_step_actor(states)
         self.update_target_networks()
 
     def train_step_critic(self, states, actions, rewards, next_states, done):
+        self.critic_optimizer.zero_grad()
         with torch.no_grad():
             target_actions = self.target_actor(next_states)
             target_actions = torch.clip(target_actions, self.env.action_space.low[0], self.env.action_space.high[0])
             reward_prediction = self.target_critic(next_states, target_actions)
-            targets = rewards + self.gamma*(1-done)*torch.reshape(reward_prediction, (-1,))
+            targets = rewards + self.gamma*(1-done)*reward_prediction
         
-        critic_ratings = torch.reshape(self.critic(states, actions), (-1,))
+        critic_ratings = self.critic(states, actions)
         L = self.mse(critic_ratings, targets) # MSE loss
 
         self.stats['critic_loss'].append(to_numpy(L))
-        self.stats['critic_pred'].append(to_numpy(critic_ratings))
-        self.stats['critic_weights'].append(list(self.critic.parameters()))
+        self.stats['critic_pred'].append(to_numpy(critic_ratings.flatten()))
+        self.stats['critic_weights'].append(list(map(to_numpy, self.critic.parameters())))
 
-        self.critic_optimizer.zero_grad()
         L.backward()
         self.critic_optimizer.step()
 
     def train_step_actor(self, states):
+        self.actor_optimizer.zero_grad()
         actor_actions = self.actor(states)
         # negative loss so that optimizer maximizes (the critic's rating) instead of minimize
         Q = -self.critic(states, actor_actions).mean()
 
         self.stats['actor_loss'].append(to_numpy(Q))
         self.stats['actor_pred'].append(to_numpy(actor_actions))
-        self.stats['actor_weights'].append(list(self.actor.parameters()))
+        self.stats['actor_weights'].append(list(map(to_numpy, self.actor.parameters())))
 
-        self.actor_optimizer.zero_grad()
         Q.backward()
         self.actor_optimizer.step()
 
@@ -327,6 +343,7 @@ class ERL:
                     state, reward, done, _ = self.env.step(action)
                     if render or (render_mode == 'trajectories' and done):
                         self.env.color = None
-                        self.env.render(mode = render_mode)
+                        if done:
+                            self.env.render(mode = render_mode)
                     fitness += reward
             return fitness/len(actors)
