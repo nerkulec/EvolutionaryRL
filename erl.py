@@ -150,6 +150,7 @@ class ERL:
 
     def train_step(self, batch_size):
         states, actions, rewards, next_states, done = self.buffer.sample(batch_size)
+        self.optimizer.zero_grad()
         self.train_step_critic(states, actions, rewards, next_states, done)
         self.train_step_actor(states)
         self.update_target_networks()

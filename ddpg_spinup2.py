@@ -5,14 +5,10 @@ from torch.optim import Adam
 import gym
 import time
 from tqdm import tqdm, trange
+import sys
+sys.path.append('/home/bartek/spinningup')
 import spinup.algos.pytorch.ddpg.core as core
 from spinup.utils.logx import EpochLogger
-import random
-
-if torch.cuda.is_available():
-    FloatTensor = torch.cuda.FloatTensor
-else:
-    FloatTensor = torch.FloatTensor
 
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, size):
@@ -41,12 +37,11 @@ class ReplayBuffer:
                      done=self.done_buf[idxs])
         return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
 
-class ERL:
+class DDPG:
     def __init__(self, env, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
-        rl_actor_steps=1200, evo_actor_steps=400, replay_size=int(1e5), gamma=0.99,
-        polyak=0.995, pi_lr=1e-3, q_lr=1e-3, act_noise=0.1, start_steps=int(1e4), update_every=50,
-        num_test_episodes=10, logger_kwargs=dict(), update_after=1000, rl_actor_copy_every=5,
-        num_actors=10, elite_frac=0.2, mutation_rate=0.01, mutation_prob=0.8):
+        steps_per_epoch=4000, replay_size=int(1e4), gamma=0.99, episodes_rl_actor = 10,
+        polyak=0.995, pi_lr=1e-3, q_lr=1e-3, act_noise=0.1, start_steps=int(10e4), update_every=50,
+        num_test_episodes=10, logger_kwargs=dict(), update_after=1000):
 
         self.logger = EpochLogger(**logger_kwargs)
         self.logger.save_config(locals())
@@ -58,13 +53,13 @@ class ERL:
             env = gym.make(env)
         self.env = env
 
-        self.rl_actor_steps = rl_actor_steps
-        self.evo_actor_steps = evo_actor_steps
+        self.steps_per_epoch = steps_per_epoch
         self.replay_size = replay_size
         self.gamma = gamma
         self.polyak = polyak
         self.act_noise = act_noise
         self.num_test_episodes = num_test_episodes
+        self.episodes_rl_actor = episodes_rl_actor
         self.start_steps = start_steps
         self.update_every = update_every
         self.update_after = update_after
@@ -81,18 +76,9 @@ class ERL:
         self.ac = actor_critic(self.env.observation_space, self.env.action_space, **ac_kwargs)
         self.ac_targ = deepcopy(self.ac)
 
-        self.actors = [deepcopy(self.ac) for _ in range(num_actors)]
-        self.elites = int(elite_frac*num_actors)
-        self.rl_actor_copy_every = rl_actor_copy_every
-        self.mutation_rate = mutation_rate
-        self.mutation_prob = mutation_prob
-
         # Freeze target networks with respect to optimizers (only update via polyak averaging)
         for p in self.ac_targ.parameters():
             p.requires_grad = False
-        for actor in self.actors:
-            for p in actor.parameters():
-                p.requires_grad = False
 
         # Experience buffer
         self.replay_buffer = ReplayBuffer(obs_dim=self.obs_dim, act_dim=self.act_dim, size=replay_size)
@@ -106,7 +92,7 @@ class ERL:
         self.pi_optimizer = Adam(self.ac.pi.parameters(), lr=pi_lr)
         self.q_optimizer = Adam(self.ac.q.parameters(), lr=q_lr)
 
-    # Set up function for computing ERL Q-loss
+    # Set up function for computing DDPG Q-loss
     def compute_loss_q(self, data):
         o, a, r, o2, d = data['obs'], data['act'], data['rew'], data['obs2'], data['done']
 
@@ -125,7 +111,7 @@ class ERL:
 
         return loss_q, loss_info
 
-    # Set up function for computing ERL pi loss
+    # Set up function for computing DDPG pi loss
     def compute_loss_pi(self, data):
         o = data['obs']
         q_pi = self.ac.q(o, self.ac.pi(o))
@@ -153,7 +139,7 @@ class ERL:
         loss_pi.backward()
         self.pi_optimizer.step()
 
-        # Unfreeze Q-network so you can optimize it at next ERL step.
+        # Unfreeze Q-network so you can optimize it at next DDPG step.
         for p in self.ac.q.parameters():
             p.requires_grad = True
 
@@ -168,22 +154,13 @@ class ERL:
                 p_targ.data.mul_(self.polyak)
                 p_targ.data.add_((1 - self.polyak) * p.data)
 
-    def get_action(self, o, noise_scale=0, actor=None):
-        if actor is None:
-            actor = self.ac
-        a = actor.act(torch.as_tensor(o, dtype=torch.float32))
+    def get_action(self, o, noise_scale):
+        a = self.ac.act(torch.as_tensor(o, dtype=torch.float32))
         a += noise_scale * np.random.randn(self.act_dim)
         return np.clip(a, -self.act_limit, self.act_limit)
 
-    def mutate(self, actor, noise): # POTENTIAL BUG
-        actor = actor.cpu()
-        for param in actor.parameters():
-            param.data.copy_(FloatTensor(np.random.normal(loc=param.data, scale=noise)))
-        # actor = actor.cuda()
-        return actor
-
     def test_agent(self):
-        self.env.color = (0, 255, 0)
+        self.env.color = (0, 0, 255)
         for j in range(self.num_test_episodes):
             o, d, ep_ret, ep_len = self.env.reset(), False, 0, 0
             while not(d or (ep_len == self.env._max_episode_steps)):
@@ -191,7 +168,7 @@ class ERL:
                 o, r, d, _ = self.env.step(self.get_action(o, 0))
                 ep_ret += r
                 ep_len += 1
-            self.env.render('trajectories')
+                self.env.render('trajectories')
             self.logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
     def train(self, epochs, batch_size):
@@ -214,11 +191,10 @@ class ERL:
         # Main loop: collect experience in env and update/log each epoch
         self.env.opacity = 64
         t = 0
-        for epoch in trange(epochs):
-            # RL Agent gathers experience
+        for epoch in range(epochs):
             self.env.color = (255, 0, 0)
             o, d, ep_len, ep_ret = self.env.reset(), False, 0, 0
-            for _ in range(self.rl_actor_steps):
+            for _ in range(self.steps_per_epoch):
                 t += 1
                 a = self.get_action(o, self.act_noise)
                 o2, r, d, _ = self.env.step(a)
@@ -237,49 +213,6 @@ class ERL:
                     for _ in range(self.update_every):
                         data = self.replay_buffer.sample_batch(batch_size)
                         self.update(data)
-            # Evolutionary agents gather experience
-            self.env.color = (0, 0, 255)
-            rewards = []
-            for actor in self.actors:
-                actor_reward = 0 # POTENTIAL BUG - SHOULD BE SAME AMOUNT OF EPISODES PER ACTOR
-                o, d, ep_len, ep_ret = self.env.reset(), False, 0, 0
-                for _ in range(self.evo_actor_steps):
-                    t += 1
-                    a = self.get_action(o, actor = actor)
-                    o2, r, d, _ = self.env.step(a)
-                    actor_reward += r
-                    ep_ret += r
-                    ep_len += 1
-                    d = False if ep_len==self.env._max_episode_steps else d
-                    self.replay_buffer.store(o, a, r, o2, d)
-                    o = o2
-                    if d or (ep_len == self.env._max_episode_steps):
-                        # self.logger.store(EpRet=ep_ret, EpLen=ep_len)
-                        o, d, ep_len, ep_ret = self.env.reset(), False, 0, 0
-                        self.env.render('trajectories')
-
-                    # Update
-                    if t >= self.update_after and t % self.update_every == 0:
-                        for _ in range(self.update_every):
-                            data = self.replay_buffer.sample_batch(batch_size)
-                            self.update(data)
-                rewards.append(actor_reward)
-            rank = np.argsort(rewards)[::-1] # best on the front
-            elites = [deepcopy(self.actors[i]) for i in rank[:self.elites]]
-            rest = []
-            for _ in range(len(self.actors)-self.elites): # tournament selection
-                a = np.random.choice(rank) # select from all
-                b = np.random.choice(rank)
-                if rewards[a] > rewards[b]: # maybe do crossover here
-                    winner = self.actors[a]
-                else:
-                    winner = self.actors[b]
-                winner = deepcopy(winner)
-                if random.random() < self.mutation_prob:
-                    winner = self.mutate(winner, self.mutation_rate)
-                rest.append(winner)
-            self.actors = elites+rest
-
             self.test_agent()
 
             # Log info about epoch
@@ -310,8 +243,8 @@ if __name__ == '__main__':
     from spinup.utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    erl = ERL(gym.make(args.env), actor_critic=core.MLPActorCritic,
+    ddpg = DDPG(gym.make(args.env), actor_critic=core.MLPActorCritic,
          ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
          gamma=args.gamma, seed=args.seed,
          logger_kwargs=logger_kwargs)
-    erl.train(epochs = args.epochs, batch_size = 256)
+    ddpg.train(epochs = args.epochs, batch_size = 256)

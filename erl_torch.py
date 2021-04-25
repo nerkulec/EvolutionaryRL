@@ -98,6 +98,34 @@ class Critic(RLNN):
 
         return x
 
+import core
+class ReplayBuffer:
+    def __init__(self, obs_dim, act_dim, size):
+        self.obs_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
+        self.obs2_buf = np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32)
+        self.act_buf = np.zeros(core.combined_shape(size, act_dim), dtype=np.float32)
+        self.rew_buf = np.zeros(size, dtype=np.float32)
+        self.done_buf = np.zeros(size, dtype=np.float32)
+        self.ptr, self.size, self.max_size = 0, 0, size
+
+    def store(self, obs, act, rew, next_obs, done):
+        self.obs_buf[self.ptr] = obs
+        self.obs2_buf[self.ptr] = next_obs
+        self.act_buf[self.ptr] = act
+        self.rew_buf[self.ptr] = rew
+        self.done_buf[self.ptr] = done
+        self.ptr = (self.ptr+1) % self.max_size
+        self.size = min(self.size+1, self.max_size)
+
+    def sample_batch(self, batch_size=32):
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        batch = dict(obs=self.obs_buf[idxs],
+                     obs2=self.obs2_buf[idxs],
+                     act=self.act_buf[idxs],
+                     rew=self.rew_buf[idxs],
+                     done=self.done_buf[idxs])
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k,v in batch.items()}
+
 class ERL:
     def __init__(self, env, actor, critic, optimizer, doc = None, buffer_size = 10**6, fresh_buffer = False,
             actions_per_epoch = 1, training_steps_per_epoch = 1, gamma = 0.99, polyak = 0.995,
@@ -116,7 +144,8 @@ class ERL:
         # self.optimizer = optimizer
         self.alg = 'erl'
         # self.buffer = get_buffer(buffer_size, self.env, doc = doc, fresh = fresh_buffer)
-        self.memory = Memory(buffer_size, int(np.prod(self.env.observation_space.shape)), int(np.prod(self.env.action_space.shape)))
+        # self.memory = Memory(buffer_size, int(np.prod(self.env.observation_space.shape)), int(np.prod(self.env.action_space.shape)))
+        self.memory = ReplayBuffer(int(np.prod(self.env.observation_space.shape)), int(np.prod(self.env.action_space.shape)), buffer_size)
 
         self.actions_per_epoch = actions_per_epoch
         self.training_steps_per_epoch = training_steps_per_epoch
@@ -165,10 +194,10 @@ class ERL:
         #     self.buffer.fill(self.env)
 
         state = self.env.reset()
-        for _ in trange(self.memory.memory_size, miniters = 1000):
+        for _ in trange(self.memory.size, miniters = 1000):
             action = self.env.action_space.sample()
             next_state, reward, done, _ = self.env.step(action)
-            self.memory.add([state, next_state, action, reward, done], None)
+            self.memory.store(state, action, reward, next_state, done)
             state = next_state
             if done:
                 state = self.env.reset()
@@ -190,7 +219,7 @@ class ERL:
                             next_state, reward, done, _ = self.env.step(action)
                             # self.buffer.store(state, action, reward, next_state, done)
                             # state, n_state, action, reward, done = datum
-                            self.memory.add([state, next_state, action, reward, done], None)
+                            self.memory.store(state, action, reward, next_state, done)
                             state = next_state
                             actor_reward += reward
                             if render:
@@ -224,7 +253,7 @@ class ERL:
                         action = self.get_action(self.actor, state, self.action_noise(epoch/epochs))
                         next_state, reward, done, _ = self.env.step(action)
                         # self.buffer.store(state, action, reward, next_state, done)
-                        self.memory.add([state, next_state, action, reward, done], None)
+                        self.memory.store(state, action, reward, next_state, done)
                         total_reward += reward
                         state = next_state
                         if render or rl_actor_render:
@@ -257,12 +286,13 @@ class ERL:
 
     def train_step(self, batch_size):
         # states, actions, rewards, next_states, done = self.buffer.sample(batch_size)
-        # states = FloatTensor(states)
-        # actions = FloatTensor(actions)
-        # next_states = FloatTensor(next_states)
-        # rewards = FloatTensor(rewards)
-        # done = FloatTensor(done)
-        states, next_states, actions, rewards, done = self.memory.sample(batch_size)
+        data = self.memory.sample_batch(batch_size)
+        states, next_states, actions, rewards, done = data['obs'], data['obs2'], data['act'], data['rew'], data['done']
+        states = states.cuda()
+        actions = actions.cuda()
+        next_states = next_states.cuda()
+        rewards = rewards.cuda()
+        done = done.cuda()
         self.train_step_critic(states, actions, rewards, next_states, done)
         self.train_step_actor(states)
         self.update_target_networks()
@@ -273,7 +303,7 @@ class ERL:
             target_actions = self.target_actor(next_states)
             target_actions = torch.clip(target_actions, self.env.action_space.low[0], self.env.action_space.high[0])
             reward_prediction = self.target_critic(next_states, target_actions)
-            targets = rewards + self.gamma*(1-done)*reward_prediction
+            targets = rewards.reshape((-1, 1)) + self.gamma*(1-done.reshape((-1, 1)))*reward_prediction
         
         critic_ratings = self.critic(states, actions)
         L = self.mse(critic_ratings, targets) # MSE loss

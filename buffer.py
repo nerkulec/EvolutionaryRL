@@ -1,68 +1,37 @@
 import numpy as np
-from tqdm.auto import tqdm, trange
-import pickle
-import pathlib
+import torch
+import spinup.algos.pytorch.ddpg.core as core
 
-def get_buffer(size, env, doc, fresh = False):
-    if not fresh:
-        try:
-            with open(doc.get_buffer_path(), 'rb') as f:
-                print('Buffer loaded from disk')
-                return pickle.load(f)
+if torch.cuda.is_available():
+    FloatTensor = torch.cuda.FloatTensor
+else:
+    FloatTensor = torch.FloatTensor
 
-        except FileNotFoundError:
-            fresh = True
-    
-    if fresh:
-        print('Fresh buffer created')
-        return Buffer(size, env, doc.env_name)
-
-class Buffer:
-    def __init__(self, size, env, name='1'):
-        self.size = size
-        self.env_id = env.spec.id
-        self.name = name
-        self.state_size = int(np.prod(env.observation_space.shape))
-        self.action_size = int(np.prod(env.action_space.shape))
+class ReplayBuffer:
+    def __init__(self, obs_dim, act_dim, size):
+        self.obs_buf = FloatTensor(np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32))
+        self.obs2_buf = FloatTensor(np.zeros(core.combined_shape(size, obs_dim), dtype=np.float32))
+        self.act_buf = FloatTensor(np.zeros(core.combined_shape(size, act_dim), dtype=np.float32))
+        self.rew_buf = FloatTensor(np.zeros(size, dtype=np.float32))
+        self.done_buf = FloatTensor(np.zeros(size, dtype=np.float32))
+        self.ptr, self.size, self.max_size = 0, 0, size
         self.i = 0
-        self.buffer = np.zeros(
-            (self.size, self.state_size*2+self.action_size+2), # (s, a, r, s', d)
-            dtype=np.float32
-        )
 
-    def store(self, state, action, reward, next_state, done):
-        i = self.i % self.size
-        
-        state = state.flatten()
-        action = action.flatten()
-        next_state = next_state.flatten()
-
-        self.buffer[i,:] = np.hstack(
-            [state, action, reward, next_state, done]
-        )
+    def store(self, obs, act, rew, next_obs, done):
+        self.obs_buf[self.ptr] = FloatTensor(obs)
+        self.obs2_buf[self.ptr] = FloatTensor(next_obs)
+        self.act_buf[self.ptr] = FloatTensor(act)
+        self.rew_buf[self.ptr] = rew
+        self.done_buf[self.ptr] = done
+        self.ptr = (self.ptr+1) % self.max_size
+        self.size = min(self.size+1, self.max_size)
         self.i += 1
 
-    def fill(self, env):
-        print("Filling up buffer")
-
-        state = env.reset()
-        for _ in trange(self.size-self.i, miniters = 1000):
-            action = env.action_space.sample()
-            next_state, reward, done, _ = env.step(action)
-            self.store(state, action, reward, next_state, done)
-            state = next_state
-            if done:
-                state = env.reset()
-        print("Buffer filled")
-        
-    def full(self):
-        return self.i >= self.size
-
-    def sample(self, sample_size):
-        sample = self.buffer[
-            np.random.choice(self.size, sample_size, replace=False), :]
-        return (sample[:, 0:self.state_size],                                                        # state
-                sample[:, self.state_size:self.state_size+self.action_size],                         # action
-                sample[:, self.state_size+self.action_size],                                         # reward
-                sample[:, self.state_size+self.action_size+1: 2*self.state_size+self.action_size+1], # next state
-                sample[:, -1])                                                                       # done
+    def sample_batch(self, batch_size=32):
+        idxs = np.random.randint(0, self.size, size=batch_size)
+        batch = dict(obs=self.obs_buf[idxs],
+                     obs2=self.obs2_buf[idxs],
+                     act=self.act_buf[idxs],
+                     rew=self.rew_buf[idxs],
+                     done=self.done_buf[idxs])
+        return {k: v for k,v in batch.items()}
