@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import spinup.algos.pytorch.ddpg.core as core
 
-if torch.cuda.is_available():
+if False and torch.cuda.is_available():
     FloatTensor = torch.cuda.FloatTensor
 else:
     FloatTensor = torch.FloatTensor

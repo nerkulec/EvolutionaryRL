@@ -13,7 +13,7 @@ from collections import defaultdict
 import itertools
 from buffer import ReplayBuffer
 
-if torch.cuda.is_available():
+if False and torch.cuda.is_available():
     FloatTensor = torch.cuda.FloatTensor
 else:
     FloatTensor = torch.FloatTensor
@@ -23,10 +23,10 @@ def to_numpy(var):
 
 class TD3:
     def __init__(self, env, hidden_sizes=(256,256), activation=nn.ReLU, seed=0, 
-        buffer_size=10**5, gamma=0.99, steps_per_epoch=4000, render_mode='human',
-        polyak=0.995, lr=0.001, act_noise=0.01, start_steps=int(1e4), update_every=50,
+        buffer_size=10**6, gamma=0.99, steps_per_epoch=4000, render_mode='human',
+        polyak=0.995, lr=0.01, act_noise=0.2, start_steps=int(1e4), update_every=50,
         num_test_episodes=1, logger_kwargs=dict(), update_after=1000, rl_actor_copy_every=5,
-        num_actors=10, elites=1, mutation_rate=0.02, mutation_prob=1,
+        num_actors=10, elites=1, mutation_rate=0.05, mutation_prob=1,
         noise_clip=0.5, policy_delay=2, target_noise=0.2,
         doc=None, print_logger=0, **kwargs):
 
@@ -59,14 +59,13 @@ class TD3:
         self.policy_delay = policy_delay
         self.target_noise = target_noise
 
-        self.env.opacity = 64
         self.obs_dim = self.env.observation_space.shape[0]
         self.act_dim = self.env.action_space.shape[0]
         self.act_limit = self.env.action_space.high[0]
 
-        self.pi = core.MLPActor(self.obs_dim, self.act_dim, hidden_sizes, activation, self.act_limit).cuda()
-        self.q1 = core.MLPQFunction(self.obs_dim, self.act_dim, hidden_sizes, activation).cuda()
-        self.q2 = core.MLPQFunction(self.obs_dim, self.act_dim, hidden_sizes, activation).cuda()
+        self.pi = core.MLPActor(self.obs_dim, self.act_dim, hidden_sizes, activation, self.act_limit)#.cuda()
+        self.q1 = core.MLPQFunction(self.obs_dim, self.act_dim, hidden_sizes, activation)#.cuda()
+        self.q2 = core.MLPQFunction(self.obs_dim, self.act_dim, hidden_sizes, activation)#.cuda()
         self.pi_targ = deepcopy(self.pi)
         self.q1_targ = deepcopy(self.q1)
         self.q2_targ = deepcopy(self.q2)
@@ -190,12 +189,14 @@ class TD3:
     def get_action(self, o, noise_scale=0, actor=None):
         with torch.no_grad():
             a = actor(FloatTensor(o)).cpu().numpy()
-        a += noise_scale * np.random.randn(self.act_dim)
+        if noise_scale != 0:
+            a += noise_scale * np.random.randn(self.act_dim)
         return np.clip(a, -self.act_limit, self.act_limit)
 
     def mutate(self, actor, noise):
+        device = 'cpu'
         for param in actor.parameters():
-            param.data.add_(torch.randn_like(param.data, device='cuda:0')*noise)
+            param.data.add_(torch.randn_like(param.data, device=device)*noise)
         return actor
 
     def test_agent(self, render=False, render_mode='human'):
@@ -222,9 +223,9 @@ class TD3:
                 winner = self.actors[a]
             else:
                 winner = self.actors[b]
-            # winner = deepcopy(winner)
+            winner = deepcopy(winner)
             if random.random() < self.mutation_prob:
-                winner = self.mutate(winner, self.mutation_rate)
+                self.mutate(winner, self.mutation_rate)
             rest.append(winner)
         self.actors = elites+rest
         if self.evo_num % self.rl_actor_copy_every:
@@ -236,31 +237,34 @@ class TD3:
         start_time = time.time()
         o, ep_ret, ep_len = self.env.reset(), 0, 0
 
-        self.env.render(render_mode)
+        self.env.render(render_mode, 1+len(self.actors))
         self.env.color = (255, 255, 255)
         # Start steps
-        for t in trange(self.start_steps, miniters = 1000):
-            a = self.env.action_space.sample()
-            o2, r, d, _ = self.env.step(a)
-            d = False if ep_len==self.env._max_episode_steps else d
-            self.replay_buffer.store(o, a, r, o2, d)
-            o = o2
-            if d or (ep_len == self.env._max_episode_steps):
-                self.logger.store(EpRet=ep_ret, EpLen=ep_len)
-                o, ep_ret, ep_len = self.env.reset(), 0, 0
-
-        actor_num = -1
-        evo_rewards = []
-        # Main loop: collect experience in env and update/log each epoch
         with tqdm(total=epochs) as pbar:
+            for t in range(self.start_steps):
+                a = self.env.action_space.sample()
+                o2, r, d, _ = self.env.step(a)
+                d = False if ep_len==self.env._max_episode_steps else d
+                self.replay_buffer.store(o, a, r, o2, d)
+                o = o2
+                if d or (ep_len == self.env._max_episode_steps):
+                    self.logger.store(EpRet=ep_ret, EpLen=ep_len)
+                    o, ep_ret, ep_len = self.env.reset(), 0, 0
+                if (t+1) % self.steps_per_epoch == 0:
+                    pbar.update()
+
+            actor_num = -1
+            evo_rewards = []
+            # Main loop: collect experience in env and update/log each epoch
             for t in range(self.start_steps, total_steps):
                 if actor_num == -1:
                     self.env.color = (255, 0, 0)
                     actor = self.pi
+                    a = self.get_action(o, self.act_noise, actor=actor)
                 else:
                     self.env.color = (0, 0, 255)
                     actor = self.actors[actor_num]
-                a = self.get_action(o, self.act_noise, actor=actor)
+                    a = self.get_action(o, 0, actor=actor)
 
                 # Step the self.env
                 o2, r, d, _ = self.env.step(a)
@@ -288,13 +292,14 @@ class TD3:
                         self.stats['actors_rewards'].append(list(sorted(evo_rewards)))
                         actor_num = -1
                         evo_rewards = []
-                    self.env.render(render_mode)
 
                 # Update handling
                 if t >= self.update_after and t % self.update_every == 0:
                     for j in range(self.update_every):
                         batch = self.replay_buffer.sample_batch(batch_size)
                         self.update(data=batch, timer=j)
+                    self.env.update_heatmap([self.pi]+self.actors)
+                    self.env.render(render_mode)
 
                 # End of epoch handling
                 if (t+1) % self.steps_per_epoch == 0:
@@ -337,7 +342,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='td3')
     parser.add_argument('--render_mode', type=str, default='human')
     parser.add_argument('--evo_actors', type=int, default=10)
-    parser.add_argument('--print_logger', type=int, default=0)
+    parser.add_argument('--print_logger', type=int, default=1)
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
@@ -347,5 +352,6 @@ if __name__ == '__main__':
          hidden_sizes=[args.hid]*args.l, 
          gamma=args.gamma, seed=args.seed, render_mode=args.render_mode,
          num_actors=args.evo_actors,
-         logger_kwargs=logger_kwargs)
-    td3.train(epochs = args.epochs, batch_size = 256)
+         logger_kwargs=logger_kwargs,
+         print_logger=args.print_logger)
+    td3.train(epochs = args.epochs, batch_size = 256, render_mode=args.render_mode)
