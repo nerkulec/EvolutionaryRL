@@ -141,8 +141,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     start_time = time.time()
     o, ep_ret, ep_len = env.reset(), 0, 0
     # env.color = (255, 0, 0)
-    # env.opacity = 64
-    # env.render()
+    # env.render(num_actors=num_actors+1)
     actor_num = -1
     evo_rewards = []
     # Main loop: collect experience in env and update/log each epoch
@@ -194,13 +193,16 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                         actors[-1] = deepcopy(ac)
                     actor_num = -1
                     evo_rewards = []
+                #     env.color = (255, 0, 0)
+                # else:
+                #     env.color = (0, 0, 255)
 
             # Update handling
             if t >= update_after and t % update_every == 0:
                 for j in range(update_every):
                     batch = replay_buffer.sample_batch(batch_size)
                     update(data=batch)
-                # env.update_heatmap([ac.pi])
+                # env.update_heatmap([ac]+actors)
                 # env.render()
 
             # End of epoch handling
