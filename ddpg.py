@@ -250,9 +250,10 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 logger.log_tabular('QVals', with_min_and_max=True)
                 logger.log_tabular('LossPi', average_only=True)
                 logger.log_tabular('LossQ', average_only=True)
-                logger.log_tabular('EvoEliteRate', average_only=True)
-                logger.log_tabular('EvoChosenRate', average_only=True)
-                logger.log_tabular('EvoDiscardRate', average_only=True)
+                if num_actors > 0:
+                    logger.log_tabular('EvoEliteRate', average_only=True)
+                    logger.log_tabular('EvoChosenRate', average_only=True)
+                    logger.log_tabular('EvoDiscardRate', average_only=True)
                 logger.log_tabular('Time', time.time()-start_time)
                 logger.dump_tabular()
 
