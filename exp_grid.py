@@ -1,19 +1,21 @@
 from spinup.utils.run_utils import ExperimentGrid
-from ddpg_spinup3 import ddpg
+from ddpg import ddpg
+from td3 import td3
+from sac import sac
 import torch
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cpu', type=int, default=4)
+    parser.add_argument('--cpu', type=int, default=1)
     parser.add_argument('--num_runs', type=int, default=1)
     args = parser.parse_args()
 
-    eg = ExperimentGrid(name='ddpg-erl-benchmark')
-    eg.add('env_name', 'HalfCheetah-v3', '', True)
+    eg = ExperimentGrid(name='ddpg-erl-benchmark-new-mutation')
+    eg.add('env_name', 'Swimmer-v3', '', True)
     eg.add('seed', list(range(args.num_runs)))
-    eg.add('epochs', 100)
-    eg.add('num_actors', [0, 10])
-    eg.add('steps_per_epoch', 4000)
+    eg.add('epochs', 40)
+    eg.add('num_actors', [10])
+    eg.add('steps_per_epoch', 11000)
     eg.add('ac_kwargs:hidden_sizes', [(64, 64)], 'hid')
     eg.run(ddpg, num_cpu=args.cpu)
