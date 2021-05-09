@@ -194,18 +194,19 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                         actors[-1] = deepcopy(ac)
                         actors[-1]._rl = True
                     actors = evolution(actors, evo_rewards, mutation_rate, num_elites)
-                    if getattr(actors[0], '_rl', False):
-                        rl_elite_counter += 1
-                    elif any(getattr(actor, '_rl', False) for actor in actors):
-                        rl_chosen_counter += 1
-                    else:
-                        rl_discard_counter += 1
-                    for actor in actors:
-                        actor._rl = False
-                    s = rl_elite_counter+rl_chosen_counter+rl_discard_counter
-                    logger.store(EvoEliteRate=rl_elite_counter/s)
-                    logger.store(EvoChosenRate=rl_chosen_counter/s)
-                    logger.store(EvoDiscardRate=rl_chosen_counter/s)
+                    if evo_num % rl_actor_copy_every == 0:
+                        if getattr(actors[0], '_rl', False):
+                            rl_elite_counter += 1
+                        elif any(getattr(actor, '_rl', False) for actor in actors):
+                            rl_chosen_counter += 1
+                        else:
+                            rl_discard_counter += 1
+                        for actor in actors:
+                            actor._rl = False
+                        s = rl_elite_counter+rl_chosen_counter+rl_discard_counter
+                        logger.store(EvoEliteRate=rl_elite_counter/s)
+                        logger.store(EvoChosenRate=rl_chosen_counter/s)
+                        logger.store(EvoDiscardRate=rl_chosen_counter/s)
                     actor_num = -1
                     evo_rewards = []
                 #     env.color = (255, 0, 0)
