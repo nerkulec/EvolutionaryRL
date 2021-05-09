@@ -29,22 +29,25 @@ def mutate(actor, noise=0.1, mut_frac=0.1, super_mut=0.05, reset_mut=0.05):
 #         param.data.add_(torch.randn_like(param.data, device=device)*noise)
 #     return actor
 
-all_time_best_reward = -1e10
+last_best_reward = -1e10
 best_param = None
 
 def evolution(actors, rewards, mutation_rate, num_elites=1):
-    global all_time_best_reward, best_param
+    global last_best_reward, best_param
     rank = np.argsort(rewards)[::-1] # best on the front
     elites = [deepcopy(actors[i]) for i in rank[:num_elites]]
     best_reward = rewards[rank[0]]
     param = list(elites[0].parameters())[0][0].detach().numpy()
-    if best_reward < all_time_best_reward:
+    worsened = False
+    if best_reward < last_best_reward:
         if (best_param - param).sum() != 0:
-            print(f'params mutated: {best_reward} < {all_time_best_reward}')
+            print(f'params mutated: {best_reward} < {last_best_reward}')
+            last_best_reward = best_reward
+            worsened = True
         else:
-            print(f'params not mutated: {best_reward} < {all_time_best_reward}')
-    if best_reward > all_time_best_reward:
-        all_time_best_reward = best_reward
+            print(f'params not mutated: {best_reward} < {last_best_reward}')
+    if best_reward > last_best_reward:
+        last_best_reward = best_reward
         best_param = param.copy()
 
     rest = []
@@ -58,4 +61,4 @@ def evolution(actors, rewards, mutation_rate, num_elites=1):
         winner = deepcopy(winner)
         mutate(winner, mutation_rate)
         rest.append(winner)
-    return elites+rest
+    return elites+rest, dict(worsened = worsened)

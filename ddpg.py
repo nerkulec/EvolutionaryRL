@@ -18,7 +18,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         polyak=0.995, pi_lr=3e-4, q_lr=1e-3, batch_size=100, start_steps=10000, 
         update_after=1000, update_every=50, act_noise=0.1, num_test_episodes=10, max_ep_len=1000, 
         logger_kwargs=dict(), save_freq=1, num_actors=10, mutation_rate=0.05,
-        num_elites=1, rl_actor_copy_every=5):
+        num_elites=1, rl_actor_copy_every=1, num_trials=1):
 
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
@@ -144,7 +144,10 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     rl_elite_counter = 0
     rl_chosen_counter = 0
     rl_discard_counter = 0
+    worsened_counter = 0
     actor_num = -1
+    trial_num = 0
+    trial_rewards = []
     evo_rewards = []
     # Main loop: collect experience in env and update/log each epoch
     with tqdm(total=epochs) as pbar:
@@ -184,16 +187,25 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     logger.store(EpRet=ep_ret, EpLen=ep_len)
                 else:
                     logger.store(EvoEpRet=ep_ret, EvoEpLen=ep_len)
-                    evo_rewards.append(ep_ret)
+                    trial_rewards.append(ep_ret)
+                    if trial_num == num_trials-1:
+                        evo_rewards.append(sum(trial_rewards)/len(trial_rewards))
                 o, ep_ret, ep_len = env.reset(), 0, 0
                 if num_actors > 0:
-                    actor_num += 1
+                    trial_num += 1
+                    if trial_num>=num_trials:
+                        actor_num += 1
+                        trial_num = 0
+                        trial_rewards = []
                 if(actor_num >= len(actors)):
                     evo_num += 1
                     if evo_num % rl_actor_copy_every == 0:
                         actors[-1] = deepcopy(ac)
                         actors[-1]._rl = True
-                    actors = evolution(actors, evo_rewards, mutation_rate, num_elites)
+                    actors, info = evolution(actors, evo_rewards, mutation_rate, num_elites)
+                    if info['worsened']:
+                        worsened_counter += 1
+                    logger.store(WorsenedRate=worsened_counter/evo_num)
                     if evo_num % rl_actor_copy_every == 0:
                         if getattr(actors[0], '_rl', False):
                             rl_elite_counter += 1
@@ -206,7 +218,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                         s = rl_elite_counter+rl_chosen_counter+rl_discard_counter
                         logger.store(EvoEliteRate=rl_elite_counter/s)
                         logger.store(EvoChosenRate=rl_chosen_counter/s)
-                        logger.store(EvoDiscardRate=rl_chosen_counter/s)
+                        logger.store(EvoDiscardRate=rl_discard_counter/s)
                     actor_num = -1
                     evo_rewards = []
                 #     env.color = (255, 0, 0)
@@ -260,6 +272,10 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                         logger.log_tabular('EvoDiscardRate', average_only=True)
                     except:
                         pass
+                    try:
+                        logger.log_tabular('WorsenedRate', average_only=True)
+                    except:
+                        pass
                 logger.log_tabular('Time', time.time()-start_time)
                 logger.dump_tabular()
 
@@ -272,8 +288,10 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--steps_per_epoch', type=int, default=11000)
     parser.add_argument('--exp_name', type=str, default='ddpg')
-    parser.add_argument('--evo_actors', type=int, default=10)
+    parser.add_argument('--num_actors', type=int, default=10)
+    parser.add_argument('--num_trials', type=int, default=1)
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
@@ -282,4 +300,5 @@ if __name__ == '__main__':
     ddpg(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l),
         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-        logger_kwargs=logger_kwargs, num_actors=args.evo_actors)
+        logger_kwargs=logger_kwargs, num_actors=args.num_actors,
+        num_trials=args.num_trials, steps_per_epoch=args.steps_per_epoch)
