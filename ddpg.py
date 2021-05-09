@@ -200,6 +200,8 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                         rl_chosen_counter += 1
                     else:
                         rl_discard_counter += 1
+                    for actor in actors:
+                        actor._rl = False
                     s = rl_elite_counter+rl_chosen_counter+rl_discard_counter
                     logger.store(EvoEliteRate=rl_elite_counter/s)
                     logger.store(EvoChosenRate=rl_chosen_counter/s)
@@ -251,9 +253,12 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 logger.log_tabular('LossPi', average_only=True)
                 logger.log_tabular('LossQ', average_only=True)
                 if num_actors > 0:
-                    logger.log_tabular('EvoEliteRate', average_only=True)
-                    logger.log_tabular('EvoChosenRate', average_only=True)
-                    logger.log_tabular('EvoDiscardRate', average_only=True)
+                    try:
+                        logger.log_tabular('EvoEliteRate', average_only=True)
+                        logger.log_tabular('EvoChosenRate', average_only=True)
+                        logger.log_tabular('EvoDiscardRate', average_only=True)
+                    except:
+                        pass
                 logger.log_tabular('Time', time.time()-start_time)
                 logger.dump_tabular()
 
