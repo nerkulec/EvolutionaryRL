@@ -15,10 +15,10 @@ from evolution import evolution, mutate
 
 def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
-        polyak=0.995, pi_lr=3e-4, q_lr=1e-3, batch_size=100, start_steps=10000, 
-        update_after=1000, update_every=50, act_noise=0.1, num_test_episodes=10, max_ep_len=1000, 
+        polyak=0.999, pi_lr=5e-5, q_lr=5e-4, batch_size=128, start_steps=10000, 
+        update_after=1000, update_every=50, act_noise=0.1, num_test_episodes=10,
         logger_kwargs=dict(), save_freq=1, num_actors=10, mutation_rate=0.05,
-        num_elites=1, rl_actor_copy_every=1, num_trials=1):
+        num_elites=1, rl_actor_copy_every=10, num_trials=1):
 
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
@@ -135,6 +135,16 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 ep_len += 1
             logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
+    def test_evo_agent():
+        for j in range(num_test_episodes):
+            o, d, ep_ret, ep_len = test_env.reset(), False, 0, 0
+            while not(d or (ep_len == env._max_episode_steps)):
+                # Take deterministic actions at test time (noise_scale=0)
+                o, r, d, _ = test_env.step(get_action(o, actors[0], 0))
+                ep_ret += r
+                ep_len += 1
+            logger.store(TestEvoEpRet=ep_ret, TestEvoEpLen=ep_len)
+
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
     start_time = time.time()
@@ -244,6 +254,7 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
                 # Test the performance of the deterministic version of the agent.
                 test_agent()
+                test_evo_agent()
 
                 # Log info about epoch
                 logger.log_tabular('Epoch', epoch)
@@ -254,6 +265,9 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 if num_actors > 0:
                     logger.log_tabular('EvoEpRet', with_min_and_max=True)
                 logger.log_tabular('TestEpRet', with_min_and_max=True)
+                if num_actors > 0:
+
+                    logger.log_tabular('TestEvoEpRet', with_min_and_max=True)
                 try:
                     logger.log_tabular('EpLen', average_only=True)
                 except:
@@ -261,8 +275,10 @@ def ddpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 if num_actors > 0:
                     logger.log_tabular('EvoEpLen', with_min_and_max=True)
                 logger.log_tabular('TestEpLen', average_only=True)
+                if num_actors > 0:
+                    logger.log_tabular('TestEvoEpLen', average_only=True)
                 logger.log_tabular('TotalEnvInteracts', t)
-                logger.log_tabular('QVals', with_min_and_max=True)
+                logger.log_tabular('QVals', average_only=True)
                 logger.log_tabular('LossPi', average_only=True)
                 logger.log_tabular('LossQ', average_only=True)
                 if num_actors > 0:

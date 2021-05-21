@@ -15,11 +15,11 @@ from evolution import evolution, mutate
 
 def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0, 
         steps_per_epoch=4000, epochs=100, replay_size=int(1e6), gamma=0.99, 
-        polyak=0.995, pi_lr=3e-4, q_lr=1e-3, batch_size=100, start_steps=10000, 
+        polyak=0.995, pi_lr=3e-4, q_lr=1e-3, batch_size=128, start_steps=10000, 
         update_after=1000, update_every=50, act_noise=0.1, target_noise=0.2, 
-        noise_clip=0.5, policy_delay=2, num_test_episodes=10, max_ep_len=1000, 
+        noise_clip=0.5, policy_delay=2, num_test_episodes=10, 
         logger_kwargs=dict(), save_freq=1, num_actors=10, mutation_rate=0.05,
-        num_elites=1, rl_actor_copy_every=5):
+        num_elites=1, rl_actor_copy_every=5, num_trials=1):
 
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
@@ -160,6 +160,16 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 ep_len += 1
             logger.store(TestEpRet=ep_ret, TestEpLen=ep_len)
 
+    def test_evo_agent():
+        for j in range(num_test_episodes):
+            o, d, ep_ret, ep_len = test_env.reset(), False, 0, 0
+            while not(d or (ep_len == env._max_episode_steps)):
+                # Take deterministic actions at test time (noise_scale=0)
+                o, r, d, _ = test_env.step(get_action(o, actors[0], 0))
+                ep_ret += r
+                ep_len += 1
+            logger.store(TestEvoEpRet=ep_ret, TestEvoEpLen=ep_len)
+
     # Prepare for interaction with environment
     total_steps = steps_per_epoch * epochs
     start_time = time.time()
@@ -167,7 +177,13 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # env.color = (255, 0, 0)
     # env.opacity = 64
     # env.render()
+    rl_elite_counter = 0
+    rl_chosen_counter = 0
+    rl_discard_counter = 0
+    worsened_counter = 0
     actor_num = -1
+    trial_num = 0
+    trial_rewards = []
     evo_rewards = []
     # Main loop: collect experience in env and update/log each epoch
     with tqdm(total=epochs) as pbar:
@@ -207,24 +223,50 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                     logger.store(EpRet=ep_ret, EpLen=ep_len)
                 else:
                     logger.store(EvoEpRet=ep_ret, EvoEpLen=ep_len)
-                    evo_rewards.append(ep_ret)
+                    trial_rewards.append(ep_ret)
+                    if trial_num == num_trials-1:
+                        evo_rewards.append(sum(trial_rewards)/len(trial_rewards))
                 o, ep_ret, ep_len = env.reset(), 0, 0
                 if num_actors > 0:
-                    actor_num += 1
+                    trial_num += 1
+                    if trial_num>=num_trials:
+                        actor_num += 1
+                        trial_num = 0
+                        trial_rewards = []
                 if(actor_num >= len(actors)):
-                    actors = evolution(actors, evo_rewards, mutation_rate, num_elites)
                     evo_num += 1
                     if evo_num % rl_actor_copy_every == 0:
                         actors[-1] = deepcopy(ac)
+                        actors[-1]._rl = True
+                    actors, info = evolution(actors, evo_rewards, mutation_rate, num_elites)
+                    if info['worsened']:
+                        worsened_counter += 1
+                    logger.store(WorsenedRate=worsened_counter/evo_num)
+                    if evo_num % rl_actor_copy_every == 0:
+                        if getattr(actors[0], '_rl', False):
+                            rl_elite_counter += 1
+                        elif any(getattr(actor, '_rl', False) for actor in actors):
+                            rl_chosen_counter += 1
+                        else:
+                            rl_discard_counter += 1
+                        for actor in actors:
+                            actor._rl = False
+                        s = rl_elite_counter+rl_chosen_counter+rl_discard_counter
+                        logger.store(EvoEliteRate=rl_elite_counter/s)
+                        logger.store(EvoChosenRate=rl_chosen_counter/s)
+                        logger.store(EvoDiscardRate=rl_discard_counter/s)
                     actor_num = -1
                     evo_rewards = []
+                #     env.color = (255, 0, 0)
+                # else:
+                #     env.color = (0, 0, 255)
 
             # Update handling
             if t >= update_after and t % update_every == 0:
                 for j in range(update_every):
                     batch = replay_buffer.sample_batch(batch_size)
                     update(data=batch, timer=j)
-                # env.update_heatmap([ac.pi])
+                # env.update_heatmap([ac]+actors)
                 # env.render()
 
             # End of epoch handling
@@ -238,6 +280,7 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
                 # Test the performance of the deterministic version of the agent.
                 test_agent()
+                test_evo_agent()
 
                 # Log info about epoch
                 logger.log_tabular('Epoch', epoch)
@@ -248,6 +291,9 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 if num_actors > 0:
                     logger.log_tabular('EvoEpRet', with_min_and_max=True)
                 logger.log_tabular('TestEpRet', with_min_and_max=True)
+                if num_actors > 0:
+
+                    logger.log_tabular('TestEvoEpRet', with_min_and_max=True)
                 try:
                     logger.log_tabular('EpLen', average_only=True)
                 except:
@@ -255,11 +301,22 @@ def td3(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
                 if num_actors > 0:
                     logger.log_tabular('EvoEpLen', with_min_and_max=True)
                 logger.log_tabular('TestEpLen', average_only=True)
+                if num_actors > 0:
+                    logger.log_tabular('TestEvoEpLen', average_only=True)
                 logger.log_tabular('TotalEnvInteracts', t)
-                logger.log_tabular('Q1Vals', with_min_and_max=True)
-                logger.log_tabular('Q2Vals', with_min_and_max=True)
                 logger.log_tabular('LossPi', average_only=True)
                 logger.log_tabular('LossQ', average_only=True)
+                if num_actors > 0:
+                    try:
+                        logger.log_tabular('EvoEliteRate', average_only=True)
+                        logger.log_tabular('EvoChosenRate', average_only=True)
+                        logger.log_tabular('EvoDiscardRate', average_only=True)
+                    except:
+                        pass
+                    try:
+                        logger.log_tabular('WorsenedRate', average_only=True)
+                    except:
+                        pass
                 logger.log_tabular('Time', time.time()-start_time)
                 logger.dump_tabular()
 
@@ -272,8 +329,11 @@ if __name__ == '__main__':
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--seed', '-s', type=int, default=0)
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--steps_per_epoch', type=int, default=11000)
     parser.add_argument('--exp_name', type=str, default='td3')
-    parser.add_argument('--evo_actors', type=int, default=10)
+    parser.add_argument('--num_actors', type=int, default=10)
+    parser.add_argument('--mutation_rate', type=int, default=0.05)
+    parser.add_argument('--num_trials', type=int, default=1)
     args = parser.parse_args()
 
     from spinup.utils.run_utils import setup_logger_kwargs
@@ -282,4 +342,6 @@ if __name__ == '__main__':
     td3(lambda : gym.make(args.env), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l),
         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
-        logger_kwargs=logger_kwargs, num_actors=args.evo_actors)
+        logger_kwargs=logger_kwargs, num_actors=args.num_actors,
+        mutation_rate=args.mutation_rate,
+        num_trials=args.num_trials, steps_per_epoch=args.steps_per_epoch)

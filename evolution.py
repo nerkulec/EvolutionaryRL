@@ -5,6 +5,7 @@ from functools import reduce
 import operator
 from random import randint, random
 from numpy.random import randn
+import fastrand
 
 def product(xs):
     return reduce(operator.mul, xs, 1)
@@ -22,6 +23,40 @@ def mutate(actor, noise=0.1, mut_frac=0.1, super_mut=0.05, reset_mut=0.05):
                 else:
                     param.data[ixs] = param.data[ixs]*randn()*noise
     return actor
+
+
+def crossover_inplace(gene1, gene2):
+    for param1, param2 in zip(gene1.parameters(), gene2.parameters()):
+
+        # References to the variable tensors
+        W1 = param1.data
+        W2 = param2.data
+
+        if len(W1.shape) == 2: #Weights no bias
+            num_variables = W1.shape[0]
+            # Crossover opertation [Indexed by row]
+            num_cross_overs = fastrand.pcg32bounded(num_variables * 2)  # Lower bounded on full swaps
+            for i in range(num_cross_overs):
+                receiver_choice = random.random()  # Choose which gene to receive the perturbation
+                if receiver_choice < 0.5:
+                    ind_cr = fastrand.pcg32bounded(W1.shape[0])  #
+                    W1[ind_cr, :] = W2[ind_cr, :]
+                else:
+                    ind_cr = fastrand.pcg32bounded(W1.shape[0])  #
+                    W2[ind_cr, :] = W1[ind_cr, :]
+
+        elif len(W1.shape) == 1: #Bias
+            num_variables = W1.shape[0]
+            # Crossover opertation [Indexed by row]
+            num_cross_overs = fastrand.pcg32bounded(num_variables)  # Lower bounded on full swaps
+            for i in range(num_cross_overs):
+                receiver_choice = random.random()  # Choose which gene to receive the perturbation
+                if receiver_choice < 0.5:
+                    ind_cr = fastrand.pcg32bounded(W1.shape[0])  #
+                    W1[ind_cr] = W2[ind_cr]
+                else:
+                    ind_cr = fastrand.pcg32bounded(W1.shape[0])  #
+                    W2[ind_cr] = W1[ind_cr]
 
 # def mutate(actor, noise=0.1):
 #     device = 'cpu'
